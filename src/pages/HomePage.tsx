@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -9,8 +8,6 @@ import {
   Button,
   Alert,
   Box,
-  ThemeProvider,
-  createTheme,
   CircularProgress,
   List,
   ListItem,
@@ -25,25 +22,9 @@ import {
   Tooltip,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import Navbar from '../components/Navbar';
-
-interface Project {
-  id: string;
-  name: string;
-  nameLower: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#0070f3',
-    },
-  },
-});
-
-const STORAGE_KEY = 'mock-api-projects';
+import { projectsApi, ApiRequestError } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
+import { Project } from '../types';
 
 const HomePage: React.FC = () => {
   const [projectName, setProjectName] = useState('');
@@ -53,44 +34,39 @@ const HomePage: React.FC = () => {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
   const navigate = useNavigate();
-
-  const baseUrl = 'http://localhost:3000/_mock-api';
+  const { showError, showSuccess, showRateLimitError } = useNotification();
 
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        // Get stored project IDs
-        const storedProjectIds = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        if (storedProjectIds.length === 0) {
-          setProjects([]);
-          setLoadingProjects(false);
-          return;
-        }
-
-        // Fetch only the stored projects
-        const response = await axios.get<Project[]>(`${baseUrl}/projects`);
-        const filteredProjects = response.data.filter(project => 
-          storedProjectIds.includes(project.nameLower)
-        );
-        setProjects(filteredProjects);
+        // Fetch all projects directly from backend (source of truth)
+        const projectList = await projectsApi.list();
+        setProjects(projectList);
       } catch (error) {
         console.error('Error fetching projects:', error);
+        if (error instanceof ApiRequestError) {
+          if (error.isRateLimited) {
+            showRateLimitError();
+          } else {
+            showError(error.message);
+          }
+        }
       } finally {
         setLoadingProjects(false);
       }
     };
 
     fetchProjects();
-  }, []);
+  }, [showError, showRateLimitError]);
 
   const handleCreateProject = async () => {
     try {
       setError(null);
       setLoading(true);
       const trimmedName = projectName.trim();
-      console.log('Creating project with name:', trimmedName);
-      
+
       // Validate project name
       if (!trimmedName) {
         setError('Project name is required');
@@ -103,35 +79,28 @@ const HomePage: React.FC = () => {
         return;
       }
 
-      const response = await axios.post<Project>(`${baseUrl}/projects`, { 
-        name: trimmedName 
-      });
-      console.log('Project creation response:', response.data);
+      const newProject = await projectsApi.create({ name: trimmedName });
 
-      if (!response.data.nameLower) {
-        console.error('Invalid response from server:', response.data);
+      if (!newProject.nameLower) {
+        console.error('Invalid response from server:', newProject);
         setError('Invalid response from server');
         return;
       }
 
-      // Store the new project ID
-      const storedProjectIds = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      if (!storedProjectIds.includes(response.data.nameLower)) {
-        storedProjectIds.push(response.data.nameLower);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(storedProjectIds));
-      }
-
       // Update projects list
-      setProjects(prev => [...prev, response.data]);
+      setProjects(prev => [...prev, newProject]);
+      showSuccess('Project created successfully');
 
-      // Use the nameLower from the response for navigation
-      const projectNameLower = response.data.nameLower;
-      console.log('Navigating to project with nameLower:', projectNameLower);
-      navigate(`/project/${projectNameLower}`);
+      // Navigate to the new project
+      navigate(`/project/${newProject.nameLower}`);
     } catch (error) {
       console.error('Error creating project:', error);
-      if (axios.isAxiosError(error)) {
-        setError(error.response?.data?.error || 'Failed to create project');
+      if (error instanceof ApiRequestError) {
+        if (error.isRateLimited) {
+          showRateLimitError();
+        } else {
+          setError(error.message);
+        }
       } else {
         setError('An unexpected error occurred');
       }
@@ -142,32 +111,31 @@ const HomePage: React.FC = () => {
 
   const handleDeleteProject = async (projectId: string) => {
     try {
-      setLoading(true);
-      await axios.delete(`${baseUrl}/projects/${projectId}`);
-      
-      // Remove from localStorage
-      const storedProjectIds = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      const updatedProjectIds = storedProjectIds.filter((id: string) => id !== projectId);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProjectIds));
-      
+      setDeletingProject(true);
+      await projectsApi.delete(projectId);
+
       // Update projects list
       setProjects(projects.filter(project => project.nameLower !== projectId));
+      showSuccess('Project deleted successfully');
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        setError(error.response?.data?.error || 'Failed to delete project');
+      if (error instanceof ApiRequestError) {
+        if (error.isRateLimited) {
+          showRateLimitError();
+        } else {
+          showError(error.message);
+        }
       } else {
-        setError('An unexpected error occurred');
+        showError('An unexpected error occurred');
       }
     } finally {
-      setLoading(false);
+      setDeletingProject(false);
       setDeleteDialogOpen(false);
       setProjectToDelete(null);
     }
   };
 
   return (
-    <ThemeProvider theme={theme}>
-      <Navbar />
+    <>
       <Container maxWidth="sm" sx={{ py: 4 }}>
         <Paper elevation={3} sx={{ p: 4, mb: 3 }}>
           <Box sx={{ mb: 3 }}>
@@ -222,7 +190,7 @@ const HomePage: React.FC = () => {
                 <React.Fragment key={project.id}>
                   <ListItem
                     component="div"
-                    sx={{ 
+                    sx={{
                       cursor: 'pointer',
                       '&:hover': {
                         backgroundColor: 'action.hover',
@@ -262,8 +230,10 @@ const HomePage: React.FC = () => {
       <Dialog
         open={deleteDialogOpen}
         onClose={() => {
-          setDeleteDialogOpen(false);
-          setProjectToDelete(null);
+          if (!deletingProject) {
+            setDeleteDialogOpen(false);
+            setProjectToDelete(null);
+          }
         }}
       >
         <DialogTitle>Delete Project</DialogTitle>
@@ -273,25 +243,28 @@ const HomePage: React.FC = () => {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button 
+          <Button
             onClick={() => {
               setDeleteDialogOpen(false);
               setProjectToDelete(null);
             }}
+            disabled={deletingProject}
           >
             Cancel
           </Button>
-          <Button 
+          <Button
             onClick={() => projectToDelete && handleDeleteProject(projectToDelete)}
             color="error"
             variant="contained"
+            disabled={deletingProject}
+            startIcon={deletingProject ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            Delete
+            {deletingProject ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>
-    </ThemeProvider>
+    </>
   );
 };
 
-export default HomePage; 
+export default HomePage;
