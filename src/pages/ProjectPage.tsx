@@ -168,9 +168,17 @@ const ProjectPage: React.FC = () => {
           <IconButton onClick={() => navigate('/')} sx={{ mr: 1 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" component="h1" sx={{ flexGrow: 1 }}>
-            Project: {project.name}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexGrow: 1 }}>
+            <Typography variant="h5" component="h1">
+              Project: {project.name}
+            </Typography>
+            <Chip
+              label={project.userId ? 'Private' : 'Public'}
+              size="small"
+              color={project.userId ? 'secondary' : 'default'}
+              variant="outlined"
+            />
+          </Box>
           <Box>
             <Button
               sx={{ mr: 1 }}
@@ -250,9 +258,15 @@ const ProjectPage: React.FC = () => {
                             size="small"
                             sx={{ mr: 1 }}
                           />
-                          <Typography variant="body1">
+                          <Typography variant="body1" sx={{ mr: 1 }}>
                             {endpoint.path}
                           </Typography>
+                          <Chip
+                            label={endpoint.userId ? 'Private' : 'Public'}
+                            size="small"
+                            color={endpoint.userId ? 'secondary' : 'default'}
+                            variant="outlined"
+                          />
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>

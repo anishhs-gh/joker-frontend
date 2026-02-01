@@ -7,6 +7,7 @@ export interface Project {
   createdAt: number;
   updatedAt: number;
   baseUrl?: string;
+  userId?: string;
 }
 
 export interface EndpointResponse {
@@ -25,6 +26,7 @@ export interface Endpoint {
   delay: number;
   createdAt: number;
   updatedAt: number;
+  userId?: string;
 }
 
 export interface LogEntry {

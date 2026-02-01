@@ -20,6 +20,7 @@ import {
   DialogContentText,
   DialogActions,
   Tooltip,
+  Chip,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { projectsApi, ApiRequestError } from '../services/api';
@@ -215,7 +216,17 @@ const HomePage: React.FC = () => {
                     }
                   >
                     <ListItemText
-                      primary={project.name}
+                      primary={
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {project.name}
+                          <Chip
+                            label={project.userId ? 'Private' : 'Public'}
+                            size="small"
+                            color={project.userId ? 'secondary' : 'default'}
+                            variant="outlined"
+                          />
+                        </Box>
+                      }
                       secondary={`Created: ${new Date(project.createdAt).toLocaleString()}`}
                     />
                   </ListItem>

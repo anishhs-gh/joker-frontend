@@ -11,9 +11,9 @@ import {
   MenuItem,
   Typography,
   Divider,
-  Button,
+  Avatar,
 } from '@mui/material';
-import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import { deepOrange } from '@mui/material/colors';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useAuth } from '../context/AuthContext';
 
@@ -68,7 +68,7 @@ const Navbar: React.FC = () => {
                     aria-haspopup="true"
                     aria-expanded={menuOpen ? 'true' : undefined}
                   >
-                    <AccountCircleIcon sx={{ fontSize: 32 }} />
+                    <Avatar sx={{ width: 32, height: 32, bgcolor: deepOrange[400] }}>{user?.email?.charAt(0).toUpperCase() || 'U'}</Avatar>
                   </IconButton>
                   <Menu
                     id="account-menu"
