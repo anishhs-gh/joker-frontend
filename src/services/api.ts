@@ -13,6 +13,9 @@ import {
   User,
   RegenerateTokenRequest,
   RegenerateTokenResponse,
+  ResendVerificationRequest,
+  PasswordResetRequest,
+  PasswordUpdateRequest,
 } from '../types';
 
 // Environment configuration
@@ -270,6 +273,42 @@ export const authApi = {
   regenerateToken: async (data?: RegenerateTokenRequest): Promise<RegenerateTokenResponse> => {
     try {
       const response = await apiClient.post<RegenerateTokenResponse>('/auth/token/regenerate', data || {});
+      return response.data;
+    } catch (error) {
+      return handleApiError(error);
+    }
+  },
+
+  /**
+   * Resend email verification link
+   */
+  resendVerificationEmail: async (data: ResendVerificationRequest): Promise<{ message: string }> => {
+    try {
+      const response = await apiClient.post<{ message: string }>('/auth/verify-email/resend', data);
+      return response.data;
+    } catch (error) {
+      return handleApiError(error);
+    }
+  },
+
+  /**
+   * Request password reset email (forgotten password)
+   */
+  resetPassword: async (data: PasswordResetRequest): Promise<{ message: string }> => {
+    try {
+      const response = await apiClient.post<{ message: string }>('/auth/password/reset', data);
+      return response.data;
+    } catch (error) {
+      return handleApiError(error);
+    }
+  },
+
+  /**
+   * Update password (change password while logged in)
+   */
+  updatePassword: async (data: PasswordUpdateRequest): Promise<{ message: string }> => {
+    try {
+      const response = await apiClient.post<{ message: string }>('/auth/password/update', data);
       return response.data;
     } catch (error) {
       return handleApiError(error);

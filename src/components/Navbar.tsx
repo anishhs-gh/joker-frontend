@@ -29,8 +29,13 @@ import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import LockIcon from '@mui/icons-material/Lock';
+import VerifiedIcon from '@mui/icons-material/Verified';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import EmailIcon from '@mui/icons-material/Email';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
+import { authApi } from '../services/api';
 
 const navTheme = createTheme({
   palette: {
@@ -71,6 +76,16 @@ const Navbar: React.FC = () => {
   const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [legacyName, setLegacyName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+
+  // Change password dialog state
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  // Email verification state
+  const [resendingVerification, setResendingVerification] = useState(false);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -151,6 +166,56 @@ const Navbar: React.FC = () => {
     setTokenCopied(false);
   };
 
+  const handleChangePasswordClick = () => {
+    handleMenuClose();
+    setChangePasswordOpen(true);
+  };
+
+  const handleChangePasswordSubmit = async () => {
+    if (!newPassword) {
+      setPasswordError('New password is required');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    setPasswordError(null);
+    setChangingPassword(true);
+    try {
+      const token = localStorage.getItem('joker_auth_token');
+      if (!token) throw new Error('Not authenticated');
+      await authApi.updatePassword({ idToken: token, newPassword });
+      showSuccess('Password updated successfully');
+      setChangePasswordOpen(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err) {
+      showError('Failed to update password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setResendingVerification(true);
+    try {
+      const token = localStorage.getItem('joker_auth_token');
+      if (!token) throw new Error('Not authenticated');
+      await authApi.resendVerificationEmail({ idToken: token });
+      showSuccess('Verification email sent! Check your inbox.');
+    } catch (err) {
+      showError('Failed to send verification email');
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   // Get display name - prefer name over email
   const displayName = user?.name || user?.email || 'User';
   const avatarLetter = (user?.name?.charAt(0) || user?.email?.charAt(0) || 'U').toUpperCase();
@@ -204,7 +269,33 @@ const Navbar: React.FC = () => {
                           {user.email}
                         </Typography>
                       )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                        {user?.emailVerified ? (
+                          <>
+                            <VerifiedIcon sx={{ fontSize: 14, color: 'success.main' }} />
+                            <Typography variant="caption" color="success.main">
+                              Verified
+                            </Typography>
+                          </>
+                        ) : (
+                          <>
+                            <ErrorOutlineIcon sx={{ fontSize: 14, color: 'warning.main' }} />
+                            <Typography variant="caption" color="warning.main">
+                              Not verified
+                            </Typography>
+                          </>
+                        )}
+                      </Box>
                     </Box>
+                    {!user?.emailVerified && (
+                      <>
+                        <Divider />
+                        <MenuItem onClick={handleResendVerification} disabled={resendingVerification}>
+                          <EmailIcon sx={{ mr: 1, fontSize: 20 }} />
+                          {resendingVerification ? 'Sending...' : 'Resend Verification Email'}
+                        </MenuItem>
+                      </>
+                    )}
                     <Divider />
                     <Box sx={{ px: 2, py: 1 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -221,6 +312,10 @@ const Navbar: React.FC = () => {
                     <MenuItem onClick={handleRegenerateClick}>
                       <VpnKeyIcon sx={{ mr: 1, fontSize: 20 }} />
                       {user?.apiTokenCreatedAt ? 'Regenerate API Token' : 'Generate API Token'}
+                    </MenuItem>
+                    <MenuItem onClick={handleChangePasswordClick}>
+                      <LockIcon sx={{ mr: 1, fontSize: 20 }} />
+                      Change Password
                     </MenuItem>
                     <Divider />
                     <MenuItem onClick={handleLogout}>
@@ -394,6 +489,72 @@ const Navbar: React.FC = () => {
           </Button>
           <Button onClick={handleCloseTokenModal} variant="contained">
             I've Saved My Token
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog
+        open={changePasswordOpen}
+        onClose={() => {
+          if (!changingPassword) {
+            setChangePasswordOpen(false);
+            setNewPassword('');
+            setConfirmNewPassword('');
+            setPasswordError(null);
+          }
+        }}
+      >
+        <DialogTitle>Change Password</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Enter your new password below.
+          </DialogContentText>
+          {passwordError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {passwordError}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            fullWidth
+            label="New Password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Enter new password"
+            sx={{ mb: 2 }}
+            disabled={changingPassword}
+          />
+          <TextField
+            fullWidth
+            label="Confirm New Password"
+            type="password"
+            value={confirmNewPassword}
+            onChange={(e) => setConfirmNewPassword(e.target.value)}
+            placeholder="Confirm new password"
+            disabled={changingPassword}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setChangePasswordOpen(false);
+              setNewPassword('');
+              setConfirmNewPassword('');
+              setPasswordError(null);
+            }}
+            disabled={changingPassword}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleChangePasswordSubmit}
+            variant="contained"
+            disabled={changingPassword}
+            startIcon={changingPassword ? <CircularProgress size={16} color="inherit" /> : <LockIcon />}
+          >
+            {changingPassword ? 'Updating...' : 'Update Password'}
           </Button>
         </DialogActions>
       </Dialog>

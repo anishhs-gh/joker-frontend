@@ -110,6 +110,22 @@ export interface User {
   name?: string;
   apiTokenCreatedAt?: number | null;
   avatarColor?: string;
+  emailVerified?: boolean;
+}
+
+// Email verification
+export interface ResendVerificationRequest {
+  idToken: string;
+}
+
+// Password management
+export interface PasswordResetRequest {
+  email: string;
+}
+
+export interface PasswordUpdateRequest {
+  idToken: string;
+  newPassword: string;
 }
 
 export interface AuthTokens {
