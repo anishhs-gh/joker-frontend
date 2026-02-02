@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 
 const SignupPage: React.FC = () => {
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -29,6 +30,14 @@ const SignupPage: React.FC = () => {
     clearError();
 
     // Validate
+    if (!name.trim()) {
+      setLocalError('Name is required');
+      return;
+    }
+    if (name.trim().length < 2) {
+      setLocalError('Name must be at least 2 characters');
+      return;
+    }
     if (!email.trim()) {
       setLocalError('Email is required');
       return;
@@ -48,7 +57,7 @@ const SignupPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await signup({ email: email.trim(), password });
+      await signup({ name: name.trim(), email: email.trim(), password });
       navigate('/');
     } catch (err) {
       // Error is handled by AuthContext
@@ -80,6 +89,19 @@ const SignupPage: React.FC = () => {
         <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <TextField
             fullWidth
+            label="Name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter your name"
+            variant="outlined"
+            disabled={submitting}
+            autoComplete="name"
+            autoFocus
+            helperText="Min 2 characters"
+          />
+          <TextField
+            fullWidth
             label="Email"
             type="email"
             value={email}
@@ -88,7 +110,6 @@ const SignupPage: React.FC = () => {
             variant="outlined"
             disabled={submitting}
             autoComplete="email"
-            autoFocus
           />
           <TextField
             fullWidth

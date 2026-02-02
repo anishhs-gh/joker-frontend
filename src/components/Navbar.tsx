@@ -12,10 +12,25 @@ import {
   Typography,
   Divider,
   Avatar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Button,
+  Alert,
+  Tooltip,
+  CircularProgress,
+  TextField,
 } from '@mui/material';
 import { deepOrange } from '@mui/material/colors';
 import LogoutIcon from '@mui/icons-material/Logout';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext';
 
 const navTheme = createTheme({
   palette: {
@@ -25,11 +40,37 @@ const navTheme = createTheme({
   },
 });
 
+const formatTokenDate = (timestamp: number | null | undefined): string => {
+  if (!timestamp) return 'Never generated';
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 const Navbar: React.FC = () => {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, regenerateToken, updateUserName } = useAuth();
+  const { showError, showSuccess } = useNotification();
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
+
+  // Regenerate token dialog state
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
+  // Token display modal state
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [newApiToken, setNewApiToken] = useState('');
+  const [tokenCopied, setTokenCopied] = useState(false);
+
+  // Legacy user name prompt state
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
+  const [legacyName, setLegacyName] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -44,6 +85,76 @@ const Navbar: React.FC = () => {
     logout();
     navigate('/login');
   };
+
+  const handleRegenerateClick = () => {
+    handleMenuClose();
+    // Check if user has a name set (legacy user check)
+    if (!user?.name) {
+      setNameDialogOpen(true);
+    } else {
+      setConfirmDialogOpen(true);
+    }
+  };
+
+  const handleNameSubmit = () => {
+    if (!legacyName.trim()) {
+      setNameError('Name is required');
+      return;
+    }
+    if (legacyName.trim().length < 2) {
+      setNameError('Name must be at least 2 characters');
+      return;
+    }
+    setNameError(null);
+    setNameDialogOpen(false);
+    setConfirmDialogOpen(true);
+  };
+
+  const handleConfirmRegenerate = async () => {
+    setRegenerating(true);
+    const isFirstGeneration = !user?.apiTokenCreatedAt;
+    try {
+      // If legacy user provided a name, pass it to regenerateToken
+      const nameToUse = !user?.name ? legacyName.trim() : undefined;
+      const response = await regenerateToken(nameToUse);
+
+      // Update user name in context if it was a legacy user
+      if (nameToUse) {
+        updateUserName(nameToUse);
+      }
+
+      setNewApiToken(response.apiToken);
+      setConfirmDialogOpen(false);
+      setShowTokenModal(true);
+      setLegacyName('');
+      showSuccess(isFirstGeneration ? 'API token generated successfully' : 'API token regenerated successfully');
+    } catch (err) {
+      showError(isFirstGeneration ? 'Failed to generate API token' : 'Failed to regenerate API token');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const handleCopyToken = async () => {
+    try {
+      await navigator.clipboard.writeText(newApiToken);
+      setTokenCopied(true);
+      setTimeout(() => setTokenCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy token:', err);
+    }
+  };
+
+  const handleCloseTokenModal = () => {
+    setShowTokenModal(false);
+    setNewApiToken('');
+    setTokenCopied(false);
+  };
+
+  // Get display name - prefer name over email
+  const displayName = user?.name || user?.email || 'User';
+  const avatarLetter = (user?.name?.charAt(0) || user?.email?.charAt(0) || 'U').toUpperCase();
+  const avatarBgColor = user?.avatarColor || deepOrange[400];
 
   return (
     <ThemeProvider theme={navTheme}>
@@ -68,7 +179,7 @@ const Navbar: React.FC = () => {
                     aria-haspopup="true"
                     aria-expanded={menuOpen ? 'true' : undefined}
                   >
-                    <Avatar sx={{ width: 32, height: 32, bgcolor: deepOrange[400] }}>{user?.email?.charAt(0).toUpperCase() || 'U'}</Avatar>
+                    <Avatar sx={{ width: 32, height: 32, bgcolor: avatarBgColor }}>{avatarLetter}</Avatar>
                   </IconButton>
                   <Menu
                     id="account-menu"
@@ -77,19 +188,40 @@ const Navbar: React.FC = () => {
                     onClose={handleMenuClose}
                     transformOrigin={{ horizontal: 'right', vertical: 'top' }}
                     anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-                    PaperProps={{
-                      elevation: 3,
-                      sx: { minWidth: 200, mt: 1 },
+                    slotProps={{
+                      paper: {
+                        elevation: 3,
+                        sx: { minWidth: 250, mt: 1 },
+                      },
                     }}
                   >
                     <Box sx={{ px: 2, py: 1 }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Signed in as
-                      </Typography>
                       <Typography variant="body1" fontWeight="medium" noWrap>
-                        {user?.email}
+                        {displayName}
+                      </Typography>
+                      {user?.name && user?.email && (
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          {user.email}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Divider />
+                    <Box sx={{ px: 2, py: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <AccessTimeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        <Typography variant="caption" color="text.secondary">
+                          API Token Created
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        {formatTokenDate(user?.apiTokenCreatedAt)}
                       </Typography>
                     </Box>
+                    <Divider />
+                    <MenuItem onClick={handleRegenerateClick}>
+                      <VpnKeyIcon sx={{ mr: 1, fontSize: 20 }} />
+                      {user?.apiTokenCreatedAt ? 'Regenerate API Token' : 'Generate API Token'}
+                    </MenuItem>
                     <Divider />
                     <MenuItem onClick={handleLogout}>
                       <LogoutIcon sx={{ mr: 1, fontSize: 20 }} />
@@ -104,6 +236,167 @@ const Navbar: React.FC = () => {
           </Box>
         </Toolbar>
       </AppBar>
+
+      {/* Legacy User Name Dialog */}
+      <Dialog
+        open={nameDialogOpen}
+        onClose={() => {
+          setNameDialogOpen(false);
+          setLegacyName('');
+          setNameError(null);
+        }}
+      >
+        <DialogTitle>Enter Your Name</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            To generate an API token, we need your name. This will be associated with your account.
+          </DialogContentText>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Name"
+            value={legacyName}
+            onChange={(e) => setLegacyName(e.target.value)}
+            error={!!nameError}
+            helperText={nameError || 'Min 2 characters'}
+            placeholder="Enter your name"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setNameDialogOpen(false);
+              setLegacyName('');
+              setNameError(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleNameSubmit} variant="contained">
+            Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => !regenerating && setConfirmDialogOpen(false)}
+      >
+        <DialogTitle>
+          {user?.apiTokenCreatedAt ? 'Regenerate API Token?' : 'Generate API Token?'}
+        </DialogTitle>
+        <DialogContent>
+          {user?.apiTokenCreatedAt ? (
+            <>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                This will invalidate your existing API token immediately.
+              </Alert>
+              <DialogContentText>
+                Any applications or scripts using your current token will stop working.
+                You'll need to update them with the new token.
+              </DialogContentText>
+            </>
+          ) : (
+            <DialogContentText>
+              This will create a new API token for authenticating requests to your mock endpoints.
+            </DialogContentText>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setConfirmDialogOpen(false)}
+            disabled={regenerating}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmRegenerate}
+            color={user?.apiTokenCreatedAt ? 'warning' : 'primary'}
+            variant="contained"
+            disabled={regenerating}
+            startIcon={regenerating ? <CircularProgress size={16} color="inherit" /> : <VpnKeyIcon />}
+          >
+            {regenerating
+              ? (user?.apiTokenCreatedAt ? 'Regenerating...' : 'Generating...')
+              : (user?.apiTokenCreatedAt ? 'Regenerate Token' : 'Generate Token')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Token Display Modal */}
+      <Dialog
+        open={showTokenModal}
+        onClose={handleCloseTokenModal}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningAmberIcon color="warning" />
+          Your API Token
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This is the only time your API token will be shown. Copy it now and store it securely!
+          </Alert>
+          <DialogContentText sx={{ mb: 2 }}>
+            Use this token to authenticate requests to your mock endpoints via the <code>X-API-Key</code> header.
+          </DialogContentText>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              p: 2,
+              bgcolor: 'grey.100',
+              borderRadius: 1,
+              fontFamily: 'monospace',
+              wordBreak: 'break-all',
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{ flexGrow: 1, fontFamily: 'monospace', color: 'text.primary' }}
+            >
+              {newApiToken}
+            </Typography>
+            <Tooltip title={tokenCopied ? 'Copied!' : 'Copy to clipboard'}>
+              <IconButton onClick={handleCopyToken} size="small" color={tokenCopied ? 'success' : 'default'}>
+                <ContentCopyIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+            Example usage:
+          </Typography>
+          <Box
+            sx={{
+              p: 1.5,
+              bgcolor: 'grey.900',
+              borderRadius: 1,
+              mt: 1,
+              overflow: 'auto',
+            }}
+          >
+            <Typography
+              variant="body2"
+              component="pre"
+              sx={{ fontFamily: 'monospace', color: 'grey.100', m: 0, fontSize: '0.75rem' }}
+            >
+{`curl -X GET https://api.joker.com/your-project/endpoint \\
+  -H "X-API-Key: ${newApiToken}"`}
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCopyToken} startIcon={<ContentCopyIcon />}>
+            {tokenCopied ? 'Copied!' : 'Copy Token'}
+          </Button>
+          <Button onClick={handleCloseTokenModal} variant="contained">
+            I've Saved My Token
+          </Button>
+        </DialogActions>
+      </Dialog>
     </ThemeProvider>
   );
 };

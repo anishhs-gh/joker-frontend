@@ -107,6 +107,9 @@ export type WsClientCommand = WsGetHistoryCommand | WsClearLogsCommand | WsPingC
 export interface User {
   uid: string;
   email: string;
+  name?: string;
+  apiTokenCreatedAt?: number | null;
+  avatarColor?: string;
 }
 
 export interface AuthTokens {
@@ -128,4 +131,23 @@ export interface LoginRequest {
 export interface SignupRequest {
   email: string;
   password: string;
+  name: string;
+}
+
+export interface SignupResponse {
+  idToken: string;
+  email: string;
+  localId: string;
+  name: string;
+  apiToken: string;
+}
+
+export interface RegenerateTokenRequest {
+  name?: string;
+}
+
+export interface RegenerateTokenResponse {
+  apiToken: string;
+  createdAt: number;
+  message: string;
 }

@@ -22,6 +22,8 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
@@ -29,6 +31,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import CodeIcon from '@mui/icons-material/Code';
 import { projectsApi, endpointsApi, getMockApiUrl, ApiRequestError } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { Project, Endpoint } from '../types';
@@ -44,6 +47,7 @@ const ProjectPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [endpointToDelete, setEndpointToDelete] = useState<string | null>(null);
   const [deletingEndpoint, setDeletingEndpoint] = useState(false);
+  const [snippetTab, setSnippetTab] = useState(0);
 
   const { showError, showSuccess, showRateLimitError } = useNotification();
 
@@ -224,6 +228,134 @@ const ProjectPage: React.FC = () => {
             </Tooltip>
           </Box>
         </Paper>
+
+        {/* How to Use Section */}
+        <Accordion sx={{ mb: 3 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CodeIcon color="primary" />
+              <Typography variant="subtitle1">How to Use Your Mock API</Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Authenticate your requests using the <strong>X-API-Key</strong> header with your API token.
+            </Alert>
+            <Tabs
+              value={snippetTab}
+              onChange={(_, newValue) => setSnippetTab(newValue)}
+              sx={{ mb: 2 }}
+            >
+              <Tab label="cURL" />
+              <Tab label="JavaScript (fetch)" />
+              <Tab label="Python" />
+            </Tabs>
+
+            {snippetTab === 0 && (
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'grey.900',
+                  borderRadius: 1,
+                  overflow: 'auto',
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  component="pre"
+                  sx={{ fontFamily: 'monospace', color: 'grey.100', m: 0, fontSize: '0.8rem' }}
+                >
+{`# GET request
+curl -X GET ${projectApiPath}/your-endpoint \\
+  -H "X-API-Key: jkr_your_api_token_here"
+
+# POST request with JSON body
+curl -X POST ${projectApiPath}/your-endpoint \\
+  -H "X-API-Key: jkr_your_api_token_here" \\
+  -H "Content-Type: application/json" \\
+  -d '{"key": "value"}'`}
+                </Typography>
+              </Box>
+            )}
+
+            {snippetTab === 1 && (
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'grey.900',
+                  borderRadius: 1,
+                  overflow: 'auto',
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  component="pre"
+                  sx={{ fontFamily: 'monospace', color: 'grey.100', m: 0, fontSize: '0.8rem' }}
+                >
+{`// GET request
+const response = await fetch('${projectApiPath}/your-endpoint', {
+  method: 'GET',
+  headers: {
+    'X-API-Key': 'jkr_your_api_token_here'
+  }
+});
+const data = await response.json();
+
+// POST request with JSON body
+const response = await fetch('${projectApiPath}/your-endpoint', {
+  method: 'POST',
+  headers: {
+    'X-API-Key': 'jkr_your_api_token_here',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ key: 'value' })
+});`}
+                </Typography>
+              </Box>
+            )}
+
+            {snippetTab === 2 && (
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'grey.900',
+                  borderRadius: 1,
+                  overflow: 'auto',
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  component="pre"
+                  sx={{ fontFamily: 'monospace', color: 'grey.100', m: 0, fontSize: '0.8rem' }}
+                >
+{`import requests
+
+# GET request
+response = requests.get(
+    '${projectApiPath}/your-endpoint',
+    headers={'X-API-Key': 'jkr_your_api_token_here'}
+)
+data = response.json()
+
+# POST request with JSON body
+response = requests.post(
+    '${projectApiPath}/your-endpoint',
+    headers={
+        'X-API-Key': 'jkr_your_api_token_here',
+        'Content-Type': 'application/json'
+    },
+    json={'key': 'value'}
+)`}
+                </Typography>
+              </Box>
+            )}
+
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+              Replace <code>jkr_your_api_token_here</code> with your actual API token.
+              You can regenerate your token from the user menu in the navbar.
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
 
         <Paper elevation={3}>
           {endpoints.length === 0 ? (

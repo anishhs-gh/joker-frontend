@@ -9,7 +9,10 @@ import {
   AuthResponse,
   LoginRequest,
   SignupRequest,
+  SignupResponse,
   User,
+  RegenerateTokenRequest,
+  RegenerateTokenResponse,
 } from '../types';
 
 // Environment configuration
@@ -225,10 +228,11 @@ export const setAuthToken = (token: string | null): void => {
 export const authApi = {
   /**
    * Sign up a new user
+   * Returns apiToken in response - this is the ONLY time it's shown
    */
-  signup: async (data: SignupRequest): Promise<AuthResponse> => {
+  signup: async (data: SignupRequest): Promise<SignupResponse> => {
     try {
-      const response = await apiClient.post<AuthResponse>('/auth/signup', data);
+      const response = await apiClient.post<SignupResponse>('/auth/signup', data);
       return response.data;
     } catch (error) {
       return handleApiError(error);
@@ -253,6 +257,19 @@ export const authApi = {
   getMe: async (): Promise<User> => {
     try {
       const response = await apiClient.get<User>('/auth/me');
+      return response.data;
+    } catch (error) {
+      return handleApiError(error);
+    }
+  },
+
+  /**
+   * Regenerate the user's API token
+   * Returns the new apiToken - this is the ONLY time it's shown
+   */
+  regenerateToken: async (data?: RegenerateTokenRequest): Promise<RegenerateTokenResponse> => {
+    try {
+      const response = await apiClient.post<RegenerateTokenResponse>('/auth/token/regenerate', data || {});
       return response.data;
     } catch (error) {
       return handleApiError(error);

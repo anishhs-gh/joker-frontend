@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { authApi, setAuthToken, ApiRequestError } from '../services/api';
-import { User, LoginRequest, SignupRequest } from '../types';
+import { User, LoginRequest, SignupRequest, RegenerateTokenResponse } from '../types';
 
 const TOKEN_STORAGE_KEY = 'joker_auth_token';
 const USER_STORAGE_KEY = 'joker_auth_user';
@@ -12,6 +12,8 @@ interface AuthContextType {
   login: (data: LoginRequest) => Promise<void>;
   signup: (data: SignupRequest) => Promise<void>;
   logout: () => void;
+  regenerateToken: (name?: string) => Promise<RegenerateTokenResponse>;
+  updateUserName: (name: string) => void;
   error: string | null;
   clearError: () => void;
 }
@@ -23,7 +25,7 @@ interface AuthProviderProps {
 }
 
 // Helper to extract user and token from various response formats
-const parseAuthResponse = (response: any): { user: User; token: string } => {
+const parseAuthResponse = (response: any): { user: User; token: string; apiToken?: string } => {
   // Try nested format: { user: { uid, email }, tokens: { idToken } }
   if (response.user && response.tokens?.idToken) {
     return {
@@ -32,14 +34,16 @@ const parseAuthResponse = (response: any): { user: User; token: string } => {
     };
   }
 
-  // Try flat format: { uid, email, idToken }
-  if (response.idToken && (response.uid || response.email)) {
+  // Try flat format: { uid, email, idToken, name?, apiToken? }
+  if (response.idToken && (response.uid || response.email || response.localId)) {
     return {
       user: {
         uid: response.uid || response.localId || '',
         email: response.email || '',
+        name: response.name,
       },
       token: response.idToken,
+      apiToken: response.apiToken,
     };
   }
 
@@ -49,8 +53,10 @@ const parseAuthResponse = (response: any): { user: User; token: string } => {
       user: {
         uid: response.localId,
         email: response.email || '',
+        name: response.name,
       },
       token: response.idToken,
+      apiToken: response.apiToken,
     };
   }
 
@@ -110,11 +116,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsLoading(true);
     try {
       const response = await authApi.login(data);
-      console.log('Login response:', response);
-      const { user: userData, token } = parseAuthResponse(response);
-      saveAuthData(token, userData);
+      const { token } = parseAuthResponse(response);
+
+      // Set token first so getMe() can authenticate
+      setAuthToken(token);
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+
+      // Fetch complete user profile including apiTokenCreatedAt
+      const fullUserProfile = await authApi.getMe();
+      setUser(fullUserProfile);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fullUserProfile));
     } catch (err) {
       console.error('Login error:', err);
+      // Clear token if getMe fails
+      setAuthToken(null);
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
       if (err instanceof ApiRequestError) {
         setError(err.message);
       } else if (err instanceof Error) {
@@ -126,18 +142,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [saveAuthData]);
+  }, []);
 
-  const signup = useCallback(async (data: SignupRequest) => {
+  const signup = useCallback(async (data: SignupRequest): Promise<void> => {
     setError(null);
     setIsLoading(true);
     try {
       const response = await authApi.signup(data);
       console.log('Signup response:', response);
-      const { user: userData, token } = parseAuthResponse(response);
-      saveAuthData(token, userData);
+      const { token } = parseAuthResponse(response);
+
+      // Set token first so getMe() can authenticate
+      setAuthToken(token);
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+
+      // Fetch complete user profile including avatarColor
+      const fullUserProfile = await authApi.getMe();
+      setUser(fullUserProfile);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fullUserProfile));
     } catch (err) {
       console.error('Signup error:', err);
+      // Clear token if getMe fails
+      setAuthToken(null);
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
       if (err instanceof ApiRequestError) {
         setError(err.message);
       } else if (err instanceof Error) {
@@ -149,7 +176,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [saveAuthData]);
+  }, []);
+
+  const updateUserName = useCallback((name: string) => {
+    if (user) {
+      const updatedUser = { ...user, name };
+      setUser(updatedUser);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+    }
+  }, [user]);
+
+  const regenerateToken = useCallback(async (name?: string): Promise<RegenerateTokenResponse> => {
+    setError(null);
+    try {
+      const response = await authApi.regenerateToken(name ? { name } : undefined);
+      // Update user with new token creation time
+      if (user) {
+        const updatedUser = { ...user, apiTokenCreatedAt: response.createdAt };
+        setUser(updatedUser);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      }
+      return response;
+    } catch (err) {
+      console.error('Regenerate token error:', err);
+      if (err instanceof ApiRequestError) {
+        setError(err.message);
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred');
+      }
+      throw err;
+    }
+  }, [user]);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -172,6 +231,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login,
         signup,
         logout,
+        regenerateToken,
+        updateUserName,
         error,
         clearError,
       }}
