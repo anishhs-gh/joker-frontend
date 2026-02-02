@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -11,42 +11,24 @@ import {
   Chip,
   Divider,
   Tooltip,
-  ThemeProvider,
-  createTheme,
   Accordion,
   AccordionSummary,
   AccordionDetails,
   List,
+  Button,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CodeIcon from '@mui/icons-material/Code';
-import Navbar from '../components/Navbar';
-import axios from 'axios';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import { projectsApi, getLogsWebSocketUrl, ApiRequestError } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
+import { Project, LogEntry, WsClientCommand } from '../types';
 
-interface Project {
-  id: string;
-  name: string;
-}
-
-interface LogEntry {
-  timestamp: string;
-  method: string;
-  path: string;
-  projectId: string;
-  requestBody: any;
-  responseStatus: number;
-  responseBody: any;
-}
-
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#0070f3',
-    },
-  },
-});
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 1000;
 
 const getMethodColor = (method: string) => {
   switch (method) {
@@ -81,21 +63,117 @@ const EndpointLogsPage: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'reconnecting'>('connecting');
 
-  const baseUrl = 'http://localhost:3000/_mock-api';
-  const wsUrl = 'ws://localhost:3000';
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const { showError, showSuccess, showWarning, showRateLimitError } = useNotification();
+
+  // WebSocket connection with auto-reconnect
+  const connectWebSocket = useCallback(() => {
+    if (!projectId) return;
+
+    // Clean up existing connection
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+
+    const wsUrl = getLogsWebSocketUrl(projectId);
+    const websocket = new WebSocket(wsUrl);
+
+    websocket.onopen = () => {
+      console.log('WebSocket connection established');
+      setConnectionStatus('connected');
+      setError(null);
+      reconnectAttemptsRef.current = 0;
+
+      // Request history on connect
+      const historyCommand: WsClientCommand = { command: 'getHistory', limit: 50 };
+      websocket.send(JSON.stringify(historyCommand));
+    };
+
+    websocket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+
+        // Handle history response
+        if (message.type === 'history' && Array.isArray(message.logs)) {
+          setLogs(message.logs);
+          return;
+        }
+
+        // Handle cleared confirmation
+        if (message.type === 'cleared') {
+          setLogs([]);
+          showSuccess('Logs cleared');
+          return;
+        }
+
+        // Handle pong (keep-alive)
+        if (message.type === 'pong') {
+          return;
+        }
+
+        // Handle new log entry
+        if (message.timestamp && message.method && message.path && message.projectId &&
+          message.hasOwnProperty('responseStatus') && message.hasOwnProperty('responseBody')) {
+          const logEntry: LogEntry = message;
+          setLogs((prevLogs) => [logEntry, ...prevLogs]);
+        }
+      } catch (error) {
+        console.error('Error processing WebSocket message:', error);
+      }
+    };
+
+    websocket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    websocket.onclose = (event) => {
+      console.log('WebSocket connection closed:', event.code, event.reason);
+      setConnectionStatus('disconnected');
+
+      // Attempt to reconnect if not a clean close
+      if (!event.wasClean && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current);
+        reconnectAttemptsRef.current++;
+        setConnectionStatus('reconnecting');
+        showWarning(`Connection lost. Reconnecting in ${delay / 1000}s...`);
+
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, delay);
+      } else if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        setError('Unable to maintain connection. Please refresh the page.');
+        showError('Connection failed after multiple attempts');
+      }
+    };
+
+    wsRef.current = websocket;
+  }, [projectId, showError, showSuccess, showWarning]);
+
+  // Fetch project data
   useEffect(() => {
     const fetchProject = async () => {
+      if (!projectId) {
+        setError('No project ID provided.');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const response = await axios.get<Project>(`${baseUrl}/projects/${projectId}`);
-        setProject(response.data);
+        const projectData = await projectsApi.get(projectId);
+        setProject(projectData);
       } catch (error) {
-        console.error('Error fetching project data for logs page:', error);
-        if (axios.isAxiosError(error)) {
-          setError(error.response?.data?.error || 'Failed to fetch project data');
+        console.error('Error fetching project data:', error);
+        if (error instanceof ApiRequestError) {
+          if (error.isRateLimited) {
+            showRateLimitError();
+          }
+          setError(error.message);
         } else {
           setError('An unexpected error occurred');
         }
@@ -104,63 +182,37 @@ const EndpointLogsPage: React.FC = () => {
       }
     };
 
-    if (projectId) {
-      fetchProject();
-    } else {
-      setError('No project ID provided.');
-      setLoading(false);
-    }
-  }, [projectId, baseUrl]);
+    fetchProject();
+  }, [projectId, showRateLimitError]);
 
+  // Initialize WebSocket connection
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || loading) return;
 
-    const websocket = new WebSocket(`${wsUrl}/ws/logs?projectId=${projectId}`);
+    connectWebSocket();
 
-    websocket.onopen = () => {
-      console.log('WebSocket connection established');
-      setError(null);
-    };
-
-    websocket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        console.log('Received message:', message);
-
-        if (message.timestamp && message.method && message.path && message.projectId && 
-            message.hasOwnProperty('responseStatus') && message.hasOwnProperty('responseBody')) {
-          const logEntry: LogEntry = message;
-          console.log('Received log entry:', logEntry);
-          setLogs((prevLogs) => [logEntry, ...prevLogs]);
-        } else {
-          console.log('Received non-log message:', message);
-          if (message.message) {
-            // Handle status messages if needed
-          }
-        }
-      } catch (error) {
-        console.error('Error processing WebSocket message:', error, 'Raw data:', event.data);
-      }
-    };
-
-    websocket.onerror = (error) => {
-      console.error('WebSocket error:', error, 'WebSocket state:', websocket.readyState);
-    };
-
-    websocket.onclose = (event) => {
-      console.log('WebSocket connection closed:', event.code, event.reason, 'WebSocket state:', websocket.readyState);
-      if (!event.wasClean) {
-        setError('WebSocket connection unexpectedly closed.');
-      }
-    };
-
-    setWs(websocket);
-
+    // Cleanup on unmount
     return () => {
-      console.log('Closing WebSocket connection');
-      websocket.close();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
-  }, [projectId, wsUrl]);
+  }, [projectId, loading, connectWebSocket]);
+
+  const handleClearLogs = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const clearCommand: WsClientCommand = { command: 'clearLogs' };
+      wsRef.current.send(JSON.stringify(clearCommand));
+    }
+  };
+
+  const handleReconnect = () => {
+    reconnectAttemptsRef.current = 0;
+    connectWebSocket();
+  };
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -175,60 +227,88 @@ const EndpointLogsPage: React.FC = () => {
     }
   };
 
+  const getConnectionStatusColor = () => {
+    switch (connectionStatus) {
+      case 'connected': return 'success';
+      case 'connecting':
+      case 'reconnecting': return 'warning';
+      case 'disconnected': return 'error';
+      default: return 'default';
+    }
+  };
+
   if (loading) {
     return (
-      <>
-        <Navbar />
-        <Container maxWidth="md" sx={{ py: 4, textAlign: 'center' }}>
-          <CircularProgress />
-          <Typography variant="h6" sx={{ mt: 2 }}>Loading project details...</Typography>
-        </Container>
-      </>
+      <Container maxWidth="md" sx={{ py: 4, textAlign: 'center' }}>
+        <CircularProgress />
+        <Typography variant="h6" sx={{ mt: 2 }}>Loading project details...</Typography>
+      </Container>
     );
   }
 
-  if (error && !ws) {
+  if (error && !wsRef.current) {
     return (
-      <>
-        <Navbar />
-        <Container maxWidth="md" sx={{ py: 4 }}>
-          <Alert severity="error">{error}</Alert>
-        </Container>
-      </>
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Alert severity="error">{error}</Alert>
+      </Container>
     );
   }
 
   if (!project) {
     return (
-      <>
-        <Navbar />
-        <Container maxWidth="md" sx={{ py: 4 }}>
-          <Alert severity="info">Project not found.</Alert>
-        </Container>
-      </>
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Alert severity="info">Project not found.</Alert>
+      </Container>
     );
   }
 
   return (
-    <ThemeProvider theme={theme}>
-      <Navbar />
-      <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="md" sx={{ py: 4 }}>
         <Box sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
-          <IconButton 
-            onClick={() => navigate(`/project/${projectId}`)} 
+          <IconButton
+            onClick={() => navigate(`/project/${projectId}`)}
             sx={{ mr: 1 }}
           >
             <ArrowBackIcon />
           </IconButton>
           <Typography variant="h5" component="h1" sx={{ flexGrow: 1 }}>
-            Live Logs for Project: {project.name}
+            Live Logs: {project.name}
           </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              label={connectionStatus}
+              color={getConnectionStatusColor() as any}
+              size="small"
+              variant="outlined"
+            />
+            {connectionStatus === 'disconnected' && (
+              <Tooltip title="Reconnect">
+                <IconButton onClick={handleReconnect} size="small">
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            <Tooltip title="Clear Logs">
+              <IconButton
+                onClick={handleClearLogs}
+                size="small"
+                disabled={connectionStatus !== 'connected'}
+              >
+                <DeleteSweepIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
 
-        {error && ws && (
-          <Alert 
-            severity="warning" 
+        {error && wsRef.current && (
+          <Alert
+            severity="warning"
             sx={{ mb: 3 }}
+            action={
+              <Button color="inherit" size="small" onClick={handleReconnect}>
+                Retry
+              </Button>
+            }
           >
             {error}
           </Alert>
@@ -254,9 +334,9 @@ const EndpointLogsPage: React.FC = () => {
                         },
                       }}
                     >
-                      <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
+                      <Box sx={{
+                        display: 'flex',
+                        alignItems: 'center',
                         width: '100%',
                         pr: 2,
                       }}>
@@ -269,19 +349,19 @@ const EndpointLogsPage: React.FC = () => {
                               </Typography>
                             </Box>
                           </Tooltip>
-                          
+
                           <Chip
                             label={log.method}
                             color={getMethodColor(log.method) as any}
                             size="small"
                             sx={{ mr: 1 }}
                           />
-                          
+
                           <Typography variant="body1" sx={{ fontFamily: 'monospace' }}>
                             {log.path}
                           </Typography>
                         </Box>
-                        
+
                         <Tooltip title={getStatusText(log.responseStatus)}>
                           <Chip
                             label={`${log.responseStatus}`}
@@ -300,10 +380,10 @@ const EndpointLogsPage: React.FC = () => {
                               Request Body
                             </Typography>
                           </Box>
-                          <Paper 
-                            variant="outlined" 
-                            sx={{ 
-                              p: 2, 
+                          <Paper
+                            variant="outlined"
+                            sx={{
+                              p: 2,
                               bgcolor: 'grey.50',
                               fontFamily: 'monospace',
                               fontSize: '0.875rem',
@@ -322,10 +402,10 @@ const EndpointLogsPage: React.FC = () => {
                               Response Body
                             </Typography>
                           </Box>
-                          <Paper 
-                            variant="outlined" 
-                            sx={{ 
-                              p: 2, 
+                          <Paper
+                            variant="outlined"
+                            sx={{
+                              p: 2,
                               bgcolor: 'grey.50',
                               fontFamily: 'monospace',
                               fontSize: '0.875rem',
@@ -347,8 +427,7 @@ const EndpointLogsPage: React.FC = () => {
           )}
         </Paper>
       </Container>
-    </ThemeProvider>
   );
 };
 
-export default EndpointLogsPage; 
+export default EndpointLogsPage;
